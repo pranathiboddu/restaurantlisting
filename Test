@@ -1,0 +1,59 @@
+CREATE OR REPLACE PROCEDURE ProcessInvoiceNotes IS
+    CURSOR noteCursor IS
+        SELECT note_num, invoice_num 
+        FROM TEMP_TABLE;  -- Replace with your actual temp table name
+
+    v_noteNum         NUMBER;
+    v_invoiceNumber   NUMBER;
+    v_noteTextClob    CLOB;
+    v_noteTextHex     VARCHAR2(32767);
+    v_finalText       VARCHAR2(32767);
+    v_aggregateNotes  CLOB;
+BEGIN
+    -- Open the cursor to iterate through each note
+    OPEN noteCursor;
+    LOOP
+        FETCH noteCursor INTO v_noteNum, v_invoiceNumber;
+        EXIT WHEN noteCursor%NOTFOUND;
+
+        -- Fetch the NOTE_TEXT CLOB for the given noteNum
+        BEGIN
+            SELECT NOTE_TEXT 
+            INTO v_noteTextClob
+            FROM gen_note
+            WHERE NOTE_NUM = v_noteNum
+            AND NOTE_CATEGORY_CD = 'Invoice - Failed';
+
+            -- Convert CLOB to Hex Representation (Simulating Java's Hex Processing)
+            v_noteTextHex := DBMS_LOB.SUBSTR(v_noteTextClob, 32767, 1);
+
+            -- Convert Hex String to Plain Text
+            v_finalText := '';
+            FOR i IN 1 .. LENGTH(v_noteTextHex) / 2 LOOP
+                v_finalText := v_finalText || CHR(TO_NUMBER(SUBSTR(v_noteTextHex, (i - 1) * 2 + 1, 2), 'XX'));
+            END LOOP;
+
+            -- Append converted text to aggregateNotes
+            v_aggregateNotes := v_aggregateNotes || v_finalText;
+
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                DBMS_OUTPUT.PUT_LINE('No NOTE_TEXT found for note_num: ' || v_noteNum);
+            WHEN OTHERS THEN
+                DBMS_OUTPUT.PUT_LINE('Error processing note_num: ' || v_noteNum || ' - ' || SQLERRM);
+        END;
+    END LOOP;
+    CLOSE noteCursor;
+
+    -- Update the aggregated notes into TEMP_TABLE
+    UPDATE TEMP_TABLE 
+    SET NOTE_TEXT = v_aggregateNotes
+    WHERE INVOICE_NUM = v_invoiceNumber;
+
+    COMMIT; -- Commit the changes
+EXCEPTION
+    WHEN OTHERS THEN
+        DBMS_OUTPUT.PUT_LINE('Error in ProcessInvoiceNotes: ' || SQLERRM);
+        ROLLBACK;
+END ProcessInvoiceNotes;
+/
